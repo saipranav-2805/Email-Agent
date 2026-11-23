@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     GOOGLE_REFRESH_TOKEN: str = ""
     PERSONAL_GMAIL_ADDRESS: str = ""
 
+    # Google APIs (College Gmail OAuth — vitapstudent.ac.in)
+    COLLEGE_GOOGLE_REFRESH_TOKEN: str = ""
+    COLLEGE_GMAIL_ADDRESS: str = ""
+
     # Paths & Timezone
     PROFILE_PATH: str = "config/profile.json"
     TIMEZONE: str = "Asia/Kolkata"

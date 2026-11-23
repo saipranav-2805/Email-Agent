@@ -15,7 +15,7 @@ from app.config import settings
 from app.db.models import Company, EmailRecord
 from app.db.session import get_db_session
 from app.services.gatekeeper import evaluate_personal_email
-from app.services.gmail_service import fetch_recent_personal_emails
+from app.services.gmail_service import fetch_recent_college_emails, fetch_recent_personal_emails
 from app.services.processor import process_incoming_email
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,53 @@ async def poll_personal_inbox_job():
 
     except Exception as e:
         logger.error(f"Error in Personal Inbox Poller job: {e}")
+
+
+async def poll_college_inbox_job():
+    """Polls college Gmail (pranav.23bce8548@vitapstudent.ac.in) every 5 minutes via direct OAuth.
+
+    This is a secondary/redundant poller — the Google Apps Script webhook is the primary ingestion
+    path for college mail. This catches anything the Apps Script misses (e.g. trigger gaps).
+    No gatekeeper needed: college inbox search query already filters to placement-only emails.
+    """
+    if not settings.COLLEGE_GOOGLE_REFRESH_TOKEN:
+        logger.debug("College Gmail polling skipped: COLLEGE_GOOGLE_REFRESH_TOKEN not configured.")
+        return
+
+    logger.info("Running scheduled College Inbox Poller...")
+    try:
+        college_emails = await asyncio.to_thread(fetch_recent_college_emails, 20)
+
+        for em in college_emails:
+            msg_id = em["message_id"]
+            thread_id = em["thread_id"]
+            sender = em["sender"]
+            subject = em["subject"]
+            body_text = em["body_text"]
+            date_str = em.get("received_at", "")
+
+            received_at = datetime.now(timezone.utc)
+            if date_str:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    received_at = parsedate_to_datetime(date_str)
+                except Exception:
+                    pass
+
+            # College emails go straight to the pipeline — no gatekeeper (already filtered by search query)
+            await process_incoming_email(
+                source_inbox="COLLEGE",
+                message_id=msg_id,
+                thread_id=thread_id,
+                sender=sender,
+                subject=subject,
+                body_text=body_text,
+                received_at=received_at,
+                raw_attachments=[],  # Attachments from college mail handled by Apps Script webhook
+            )
+
+    except Exception as e:
+        logger.error(f"Error in College Inbox Poller job: {e}")
 
 
 async def daily_digest_job():
@@ -219,7 +266,16 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # 2. Daily Digest: 9:00 PM IST (21:00) every day
+    # 2. College Inbox Direct Poller: Every 5 minutes (Secondary/Fallback to Google Apps Script)
+    if settings.COLLEGE_GOOGLE_REFRESH_TOKEN:
+        scheduler.add_job(
+            poll_college_inbox_job,
+            trigger=IntervalTrigger(minutes=5),
+            id="college_inbox_poller",
+            replace_existing=True,
+        )
+
+    # 3. Daily Digest: 9:00 PM IST (21:00) every day
     scheduler.add_job(
         daily_digest_job,
         trigger=CronTrigger(hour=21, minute=0, timezone=ist_tz),
@@ -227,7 +283,7 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # 3. Weekly Review: Sunday 8:00 PM IST (20:00)
+    # 4. Weekly Review: Sunday 8:00 PM IST (20:00)
     scheduler.add_job(
         weekly_review_job,
         trigger=CronTrigger(day_of_week="sun", hour=20, minute=0, timezone=ist_tz),

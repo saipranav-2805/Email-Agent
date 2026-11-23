@@ -73,13 +73,14 @@ async def pipeline_command_handler(update: Update, context: ContextTypes.DEFAULT
 
 
 async def backfill_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Backfills past placement emails from Personal Gmail into the pipeline."""
+    """Backfills past placement emails from both Personal and College Gmail into the pipeline."""
     if update.effective_message:
-        await update.effective_message.reply_text("🔄 Scanning your inbox for past placement & test emails... This will take a few seconds.")
+        await update.effective_message.reply_text("🔄 Scanning your inboxes (Personal + College) for past placement & test emails... This will take a few moments.")
 
-    from app.services.scheduler import poll_personal_inbox_job
+    from app.services.scheduler import poll_college_inbox_job, poll_personal_inbox_job
     try:
         await poll_personal_inbox_job()
+        await poll_college_inbox_job()
         if update.effective_message:
             await update.effective_message.reply_text("✅ Inbox scan completed! All detected companies and tests are loaded. Use /pipeline to see your status.")
     except Exception as e:

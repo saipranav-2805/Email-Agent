@@ -36,8 +36,30 @@ def get_google_credentials() -> Optional[Credentials]:
         return None
 
 
+def get_college_google_credentials() -> Optional[Credentials]:
+    """Builds Google OAuth2 credentials for the college Gmail account."""
+    if not (settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and settings.COLLEGE_GOOGLE_REFRESH_TOKEN):
+        return None
+
+    try:
+        creds = Credentials(
+            token=None,
+            refresh_token=settings.COLLEGE_GOOGLE_REFRESH_TOKEN,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=settings.GOOGLE_CLIENT_ID,
+            client_secret=settings.GOOGLE_CLIENT_SECRET,
+            scopes=[
+                "https://www.googleapis.com/auth/gmail.readonly",
+            ],
+        )
+        return creds
+    except Exception as e:
+        logger.error(f"Failed to create college Google OAuth credentials: {e}")
+        return None
+
+
 def get_gmail_service():
-    """Builds authorized Gmail API service."""
+    """Builds authorized Gmail API service (personal account)."""
     creds = get_google_credentials()
     if not creds:
         return None
@@ -45,6 +67,18 @@ def get_gmail_service():
         return build("gmail", "v1", credentials=creds, cache_discovery=False)
     except Exception as e:
         logger.error(f"Failed to build Gmail service: {e}")
+        return None
+
+
+def get_college_gmail_service():
+    """Builds authorized Gmail API service for college account."""
+    creds = get_college_google_credentials()
+    if not creds:
+        return None
+    try:
+        return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        logger.error(f"Failed to build college Gmail service: {e}")
         return None
 
 
@@ -157,6 +191,75 @@ def fetch_recent_personal_emails(max_results: int = 15) -> List[Dict[str, Any]]:
         return []
 
 
+def fetch_recent_college_emails(max_results: int = 20) -> List[Dict[str, Any]]:
+    """Fetches recent placement emails from the college Gmail account via OAuth.
+
+    Uses a targeted Gmail search to only pull placement-relevant threads.
+    Falls back to empty list if college OAuth is not configured (Apps Script
+    webhook is the primary ingestion path; this is a secondary direct poller).
+    """
+    service = get_college_gmail_service()
+    if not service:
+        logger.debug("College Gmail service not configured — skipping direct college poller.")
+        return []
+
+    college_addr = (settings.COLLEGE_GMAIL_ADDRESS or "").strip().lower()
+
+    try:
+        # Targeted search: only placement/career/CDC emails to avoid inbox noise
+        results = service.users().messages().list(
+            userId="me",
+            maxResults=max_results,
+            q=(
+                'in:inbox -label:AgentProcessed '
+                '(placement OR "cdc" OR "pat" OR shortlist OR interview OR assessment '
+                'OR superset OR neopat OR hackerrank OR mettl OR "test link" OR "offer letter")'
+            ),
+        ).execute()
+
+        messages = results.get("messages", [])
+        detailed_emails = []
+
+        for m in messages:
+            msg_id = m.get("id")
+            full_msg = service.users().messages().get(
+                userId="me",
+                id=msg_id,
+                format="full",
+            ).execute()
+
+            payload = full_msg.get("payload", {})
+            headers_list = payload.get("headers", [])
+            headers = {h["name"]: h["value"] for h in headers_list if "name" in h and "value" in h}
+
+            subject = headers.get("Subject", "(No Subject)")
+            sender = headers.get("From", "")
+            received_at = headers.get("Date", "")
+            labels = full_msg.get("labelIds", [])
+            snippet = full_msg.get("snippet", "")
+            body_text = _extract_body_from_payload(payload) or snippet
+
+            detailed_emails.append({
+                "message_id": msg_id,
+                "thread_id": full_msg.get("threadId", msg_id),
+                "sender": sender,
+                "subject": subject,
+                "body_text": body_text,
+                "snippet": snippet,
+                "received_at": received_at,
+                "labels": labels,
+                "headers": headers,
+                "source_inbox": "college",
+            })
+
+        logger.info(f"College inbox direct poller: fetched {len(detailed_emails)} candidate emails.")
+        return detailed_emails
+
+    except Exception as e:
+        logger.error(f"Error fetching college emails from Gmail API: {e}")
+        return []
+
+
 def send_placement_loud_alarm(company_name: str, reason: str, action_details: str) -> bool:
     """Sends a priority email to personal Gmail with [PLACEMENT-ALARM] to trigger iOS Shortcuts loud alarm."""
     service = get_gmail_service()
@@ -223,3 +326,40 @@ def search_personal_gmail(query: str, max_results: int = 10) -> List[Dict[str, A
     except Exception as e:
         logger.error(f"Failed to search personal Gmail: {e}")
         return []
+
+
+def search_college_gmail(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+    """Live search across College Gmail messages (pranav.23bce8548@vitapstudent.ac.in)."""
+    service = get_college_gmail_service()
+    if not service:
+        return []
+
+    try:
+        results = service.users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=max_results,
+        ).execute()
+
+        messages = results.get("messages", [])
+        found_items = []
+        for m in messages:
+            msg = service.users().messages().get(
+                userId="me",
+                id=m["id"],
+                format="metadata",
+                metadataHeaders=["Subject", "From", "Date"],
+            ).execute()
+            headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+            found_items.append({
+                "message_id": m["id"],
+                "subject": headers.get("Subject", ""),
+                "sender": headers.get("From", ""),
+                "date": headers.get("Date", ""),
+                "snippet": msg.get("snippet", ""),
+            })
+        return found_items
+    except Exception as e:
+        logger.error(f"Failed to search college Gmail: {e}")
+        return []
+

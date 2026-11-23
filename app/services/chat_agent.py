@@ -8,7 +8,7 @@ from app.config import load_candidate_profile, settings
 from app.db.models import Company, EmailRecord, ScheduledReminder, UserPreference
 from app.db.session import get_db_session
 from app.services.calendar_service import create_calendar_event as gcal_create_event
-from app.services.gmail_service import search_personal_gmail
+from app.services.gmail_service import search_college_gmail, search_personal_gmail
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,22 @@ async def tool_search_emails(query: str, inbox: str = "ALL") -> str:
                     "snippet": item["snippet"][:120],
                 })
         except Exception as e:
-            logger.warning(f"Live Gmail search error: {e}")
+            logger.warning(f"Live Personal Gmail search error: {e}")
+
+    # Search live college Gmail if requested/all
+    if clean_inbox in ["COLLEGE", "ALL"] and settings.COLLEGE_GOOGLE_REFRESH_TOKEN:
+        try:
+            live_college_items = await asyncio.to_thread(search_college_gmail, clean_query, 5)
+            for item in live_college_items:
+                results.append({
+                    "source": "Live College Gmail",
+                    "subject": item["subject"][:60],
+                    "sender": item["sender"][:40],
+                    "date": item["date"],
+                    "snippet": item["snippet"][:120],
+                })
+        except Exception as e:
+            logger.warning(f"Live College Gmail search error: {e}")
 
     if not results:
         return f"No emails found matching query '{query}' in {inbox} inbox."
