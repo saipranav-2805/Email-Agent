@@ -1,0 +1,40 @@
+{
+  "reg_no": "23BCE8548",
+  "name": "SaiPranav Yellaram",
+  "college_email": "pranav.23bce8548@vitstudent.ac.in",
+  "personal_email": "saipranav.yellaram@gmail.com",
+  "branch": "Computer Science and Engineering",
+  "degree": "B.Tech",
+  "cgpa": 8.79,
+  "tenth_pct": 88,
+  "twelfth_pct": 73,
+  "active_backlogs": 0,
+  "history_of_backlogs": 0,
+  "career_interests": [
+    "Software Development",
+    "Backend Engineering",
+    "Machine Learning / AI",
+    "Systems Engineering"
+  ],
+  "disliked_roles": [
+    "Sales / Business Development",
+    "Technical Support / Operations",
+    "Cold Outreach",
+    "Manual Testing"
+  ],
+  "red_flags": [
+    "Vellore campus",
+    "offline interview at Vellore",
+    "physical reporting at Vellore",
+    "service agreement",
+    "unpaid internship"
+  ],
+  "min_ctc_lpa": 0,
+  "preferred_locations": [
+    "Hyderabad",
+    "Pune",
+    "Delhi NCR",
+    "Banglore",
+    "Remote"
+  ]
+}

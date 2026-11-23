@@ -1,0 +1,44 @@
+{
+  "reg_no": "21BCE1001",
+  "name": "Pranav Sharma",
+  "college_email": "pranav.sharma2021@vitstudent.ac.in",
+  "personal_email": "pranav.dev.chief@gmail.com",
+  "branch": "Computer Science and Engineering",
+  "degree": "B.Tech",
+  "cgpa": 8.85,
+  "tenth_pct": 94.2,
+  "twelfth_pct": 93.6,
+  "active_backlogs": 0,
+  "history_of_backlogs": 0,
+  "career_interests": [
+    "Software Development",
+    "Backend Engineering",
+    "Machine Learning / AI",
+    "Systems Engineering",
+    "Cloud & DevOps"
+  ],
+  "disliked_roles": [
+    "Sales / Business Development",
+    "Technical Support / Operations",
+    "Cold Outreach",
+    "Manual Testing"
+  ],
+  "red_flags": [
+    "Vellore campus",
+    "offline interview at Vellore",
+    "physical reporting at Vellore",
+    "service agreement",
+    "employment bond",
+    "financial penalty on leaving",
+    "rotational night shift",
+    "unpaid internship"
+  ],
+  "min_ctc_lpa": 6.5,
+  "preferred_locations": [
+    "Bengaluru",
+    "Hyderabad",
+    "Pune",
+    "Delhi NCR",
+    "Remote"
+  ]
+}
