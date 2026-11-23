@@ -62,16 +62,45 @@ def test_newsletter_with_list_unsubscribe_header_is_blocked():
     assert "List-Unsubscribe" in decision.reason
 
 
-def test_direct_personal_email_is_allowed():
-    """Legitimate 1-on-1 personal email with no spam flags is allowed."""
+def test_placement_alarm_loop_prevention_is_blocked():
+    """CRITICAL: [PLACEMENT-ALARM] emails sent by the bot must NEVER be ingested or re-processed to prevent loops."""
     decision = evaluate_personal_email(
-        sender="professor.doe@college.edu",
-        subject="Project consultation meeting",
+        sender="saipranav.yellaram@gmail.com",
+        subject="[PLACEMENT-ALARM] Google - Shortlist",
         labels=["INBOX"],
         headers={},
         known_companies=["Google"],
-        body_snippet="Hi Pranav, let's meet tomorrow at 11 AM to discuss your project.",
+        body_snippet="CHIEF OF STAFF PRIORITY ALARM: Company: Google",
+    )
+
+    assert decision.is_allowed is False
+    assert "loop prevention" in decision.reason.lower() or "self-sent" in decision.reason.lower()
+
+
+def test_self_sent_personal_email_is_blocked():
+    """Emails sent by user to themselves are skipped to avoid reprocessing bot outputs."""
+    decision = evaluate_personal_email(
+        sender="saipranav.yellaram@gmail.com",
+        subject="Random Note to Self",
+        labels=["INBOX"],
+        headers={},
+        known_companies=[],
+        body_snippet="Remember to study graph algorithms",
+    )
+
+    assert decision.is_allowed is False
+    assert "self-sent" in decision.reason.lower()
+
+
+def test_direct_personal_email_is_allowed():
+    """Legitimate 1-on-1 personal email with no spam flags is allowed."""
+    decision = evaluate_personal_email(
+        sender="recruiter@stripe.com",
+        subject="Interview confirmation for Backend Engineer",
+        labels=["INBOX"],
+        headers={},
+        known_companies=["Stripe"],
+        body_snippet="Hi Pranav, let's meet tomorrow at 11 AM to discuss your interview.",
     )
 
     assert decision.is_allowed is True
-    assert "Direct personal email" in decision.reason

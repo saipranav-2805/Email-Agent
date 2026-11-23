@@ -98,15 +98,17 @@ def fetch_recent_personal_emails(max_results: int = 15) -> List[Dict[str, Any]]:
         return []
 
     try:
-        # Fetch recent messages from inbox
+        # Fetch recent messages from inbox, strictly excluding self-sent and placement-alarm emails
         results = service.users().messages().list(
             userId="me",
             maxResults=max_results,
-            q="in:inbox",
+            q="in:inbox -subject:[PLACEMENT-ALARM] -from:me",
         ).execute()
 
         messages = results.get("messages", [])
         detailed_emails = []
+
+        my_addr = (settings.PERSONAL_GMAIL_ADDRESS or "").strip().lower()
 
         for m in messages:
             msg_id = m.get("id")
@@ -122,6 +124,12 @@ def fetch_recent_personal_emails(max_results: int = 15) -> List[Dict[str, Any]]:
 
             subject = headers.get("Subject", "(No Subject)")
             sender = headers.get("From", "")
+
+            # Circuit breaker: Never ingest emails sent by self or placement alarms
+            if my_addr and my_addr in sender.lower():
+                continue
+            if "[placement-alarm]" in subject.lower():
+                continue
             received_at = headers.get("Date", "")
             labels = full_msg.get("labelIds", [])
             snippet = full_msg.get("snippet", "")

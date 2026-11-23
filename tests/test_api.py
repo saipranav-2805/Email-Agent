@@ -48,26 +48,39 @@ async def test_college_ingest_auth_failure():
 @pytest.mark.asyncio
 async def test_college_ingest_successful_flow():
     """Tests POST /ingest/college successfully ingests email when authorized."""
+    from unittest.mock import patch
+    from app.services.classifier import ClassificationResult, TierEnum
+
+    mock_classification = ClassificationResult(
+        tier=TierEnum.TIER_2_ACTION,
+        company_name="Uber",
+        role="SDE Intern",
+        is_eligible=True,
+        action_required="Apply before tomorrow",
+        concise_summary="Uber SDE Intern hiring",
+    )
+
     await init_db()
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        payload = {
-            "message_id": "msg_api_success_456",
-            "thread_id": "thread_api_success_456",
-            "sender": "cdc@college.edu",
-            "subject": "Urgent: Uber Campus Recruitment Drive - SDE Intern",
-            "body_text": "Uber is hiring SDE Interns. Stipend 1.5L/month. Apply before tomorrow.",
-            "received_at": datetime.now(timezone.utc).isoformat(),
-            "attachments": [],
-        }
+    with patch("app.services.processor.classify_email_content", return_value=mock_classification):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            payload = {
+                "message_id": "msg_api_success_456",
+                "thread_id": "thread_api_success_456",
+                "sender": "cdc@college.edu",
+                "subject": "Urgent: Uber Campus Recruitment Drive - SDE Intern",
+                "body_text": "Uber is hiring SDE Interns. Stipend 1.5L/month. Apply before tomorrow.",
+                "received_at": datetime.now(timezone.utc).isoformat(),
+                "attachments": [],
+            }
 
-        response = await client.post(
-            "/ingest/college",
-            json=payload,
-            headers={"X-API-KEY": settings.COLLEGE_WEBHOOK_API_KEY},
-        )
+            response = await client.post(
+                "/ingest/college",
+                json=payload,
+                headers={"X-API-KEY": settings.COLLEGE_WEBHOOK_API_KEY},
+            )
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "processed"
-        assert data["email_id"] is not None
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "processed"
+            assert data["email_id"] is not None

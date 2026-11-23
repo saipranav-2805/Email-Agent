@@ -59,6 +59,25 @@ def evaluate_personal_email(
     combined_header_text = f"{subject_clean} {sender_clean}".lower()
     snippet_clean = (body_snippet or "")[:500].lower()
 
+    # 0. Circuit Breaker: Block self-sent emails and placement alarm loops
+    if "[placement-alarm]" in combined_header_text:
+        return GatekeeperDecision(
+            is_allowed=False,
+            reason="Blocked: Placement alarm email loop prevention",
+        )
+    if "placement chief of staff" in combined_header_text or "chief of staff priority alarm" in snippet_clean:
+        return GatekeeperDecision(
+            is_allowed=False,
+            reason="Blocked: Agent alarm email loop prevention",
+        )
+    from app.config import settings
+    my_addr = (settings.PERSONAL_GMAIL_ADDRESS or "").strip().lower()
+    if my_addr and my_addr in sender_clean.lower():
+        return GatekeeperDecision(
+            is_allowed=False,
+            reason="Blocked: Self-sent personal email",
+        )
+
     matched_company = None
     matched_keyword = None
 

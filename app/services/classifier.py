@@ -404,6 +404,16 @@ def heuristic_classification(
     # Red flags
     flags = [rf for rf in profile.red_flags if rf.lower() in text_lower]
 
+    # Drop emails with no subject or generic text from triggering alarms
+    if text_lower.startswith("(no subject)") or not subject.strip():
+        if not candidate_matched:
+            return ClassificationResult(
+                tier=TierEnum.TIER_4_NOISE,
+                is_eligible=False,
+                eligibility_reason="Ignored email with no subject",
+                concise_summary="Email without subject or company match ignored.",
+            )
+
     # Check for Applied list
     if "applied list" in text_lower or "registered candidates" in text_lower:
         return ClassificationResult(

@@ -93,6 +93,14 @@ async def process_incoming_email(
     raw_attachments: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Main ingestion pipeline: deduplication, deterministic attachment scan, 4-tier triage, notifications, calendar sync, and alarm."""
+    # Circuit breaker: Never ingest or process agent's own alarm emails
+    if "[placement-alarm]" in subject.lower() or "chief of staff priority alarm" in body_text.lower():
+        logger.info(f"Dropping alarm feedback email to prevent feedback loop: {subject}")
+        return {
+            "status": "dropped",
+            "message": "Placement alarm loop prevented",
+        }
+
     profile = load_candidate_profile()
 
     # 1. Deduplication Check
@@ -189,11 +197,14 @@ async def process_incoming_email(
 
     # 6. Free Loud Alarm Bridge (For TIER_1_CRITICAL)
     alarm_sent = False
-    if classification.tier == TierEnum.TIER_1_CRITICAL:
+    clean_comp = (classification.company_name or "").strip()
+    is_valid_company = clean_comp and clean_comp.lower() not in ["none", "unknown", "(no subject)", "not specified", "campus opportunity"]
+
+    if classification.tier == TierEnum.TIER_1_CRITICAL and is_valid_company:
         try:
             alarm_sent = await asyncio.to_thread(
                 send_placement_loud_alarm,
-                company_name=classification.company_name or subject[:40],
+                company_name=clean_comp,
                 reason=classification.action_required or "Shortlist / Urgent Deadline",
                 action_details=classification.concise_summary,
             )
