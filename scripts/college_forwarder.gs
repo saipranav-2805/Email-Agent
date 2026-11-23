@@ -15,10 +15,10 @@
 
 const CONFIG = {
   // Your deployed FastAPI backend URL on Render/Railway/Fly.io/VPS or ngrok for local dev
-  BACKEND_URL: "https://your-app.onrender.com/ingest/college",
+  BACKEND_URL: "https://email-agent-cnfp.onrender.com",
 
   // Must match COLLEGE_WEBHOOK_API_KEY in your .env
-  API_KEY: "change_this_to_your_college_webhook_api_key",
+  API_KEY: "mera-collegemahanhai",
 
   // Gmail search query to capture all placement, career, assessment, test, and shortlist emails
   SEARCH_QUERY: 'in:inbox -label:AgentProcessed (placement OR "cdc" OR "pat" OR "career" OR shortlist OR interview OR assessment OR superset OR neopat OR hackerrank OR mettl OR "test link" OR "applied list" OR "shortlisted list")',
@@ -37,9 +37,10 @@ const CONFIG = {
  * Creates or gets the Gmail label used for tracking processed emails.
  */
 function getOrCreateLabel(labelName) {
-  let label = GmailApp.getUserLabelByName(labelName);
+  const name = labelName || CONFIG.PROCESSED_LABEL || "AgentProcessed";
+  let label = GmailApp.getUserLabelByName(name);
   if (!label) {
-    label = GmailApp.createLabel(labelName);
+    label = GmailApp.createLabel(name);
   }
   return label;
 }
