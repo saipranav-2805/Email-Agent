@@ -305,149 +305,130 @@ async def execute_tool_call(name: str, args: Dict[str, Any]) -> str:
 
 async def handle_user_chat_message(user_message: str) -> str:
     """Handles an interactive chat message from Telegram using Gemini with tool calling or direct fallback."""
-    # Check for direct local intent fast path if no API key is set
     clean_msg = user_message.strip()
+    if not clean_msg:
+        return "Please send a message or instruction."
 
-    if not settings.GEMINI_API_KEY and not settings.GROQ_API_KEY:
-        # Local heuristic responses when running completely offline without API keys
-        lower_msg = clean_msg.lower()
-        if "pipeline" in lower_msg or "status" in lower_msg or "companies" in lower_msg:
-            return await tool_get_company_pipeline()
-        if "applied" in lower_msg and ("mark" in lower_msg or "set" in lower_msg):
-            words = clean_msg.split()
-            comp = words[-1]
-            return await tool_update_company_status(comp, "applied")
-        return f"Offline mode: You said '{clean_msg}'. Configure GEMINI_API_KEY to activate full conversational tools."
-
-    # Use Gemini with Tool Calling
+    # 1. Try Gemini with async client
     if settings.GEMINI_API_KEY:
-        try:
-            from google import genai
-            from google.genai import types
+        gemini_models = [settings.GEMINI_DEEP_MODEL, settings.GEMINI_FAST_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash"]
+        unique_gemini = [m for i, m in enumerate(gemini_models) if m and m not in gemini_models[:i]]
 
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            model_name = settings.GEMINI_DEEP_MODEL or "gemini-2.5-flash"
+        for g_model in unique_gemini:
+            try:
+                from google import genai
+                from google.genai import types
 
-            # Create tools definitions
-            tool_declarations = [
-                types.Tool(function_declarations=[
-                    types.FunctionDeclaration(
-                        name=t["name"],
-                        description=t["description"],
-                        parameters=t["parameters"],
-                    )
-                    for t in AVAILABLE_TOOLS
-                ])
-            ]
+                client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-            chat_history = [
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=clean_msg)],
-                )
-            ]
+                # Tool wrappers
+                async def search_emails(query: str, inbox: str = "ALL") -> str:
+                    """Search database and live Gmail API for specific emails, companies, or test links."""
+                    return await tool_search_emails(query, inbox)
 
-            # First turn: model decides whether to call a tool
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=model_name,
-                contents=chat_history,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    tools=tool_declarations,
-                    temperature=0.2,
-                ),
-            )
+                async def get_company_pipeline(status_filter: str = "") -> str:
+                    """List companies tracked in the placement pipeline, optionally filtered by status."""
+                    return await tool_get_company_pipeline(status_filter)
 
-            # Check for function calls
-            if response.function_calls:
-                tool_results_parts = []
-                for fc in response.function_calls:
-                    fn_name = fc.name
-                    fn_args = dict(fc.args) if fc.args else {}
-                    tool_output = await execute_tool_call(fn_name, fn_args)
-                    tool_results_parts.append(
-                        types.Part.from_function_response(
-                            name=fn_name,
-                            response={"result": tool_output},
-                        )
-                    )
+                async def update_company_status(company_name: str, status: str, notes: str = "") -> str:
+                    """Manually mark a company as 'applied', 'shortlisted', 'interview', 'rejected', 'offer', or 'ignored'."""
+                    return await tool_update_company_status(company_name, status, notes)
 
-                # Send tool results back for final answer
-                followup_contents = [
-                    types.Content(role="user", parts=[types.Part.from_text(text=clean_msg)]),
-                    response.candidates[0].content,
-                    types.Content(role="user", parts=tool_results_parts),
-                ]
+                async def create_calendar_event(title: str, start_iso: str, duration_mins: int = 60, description: str = "") -> str:
+                    """Create custom reminders or test/interview events on Google Calendar."""
+                    return await tool_create_calendar_event(title, start_iso, duration_mins, description)
 
-                final_response = await asyncio.to_thread(
-                    client.models.generate_content,
-                    model=model_name,
-                    contents=followup_contents,
+                async def save_preference(rule_text: str) -> str:
+                    """Save permanent instructions or preferences so future classifications obey them."""
+                    return await tool_save_preference(rule_text)
+
+                chat = client.aio.chats.create(
+                    model=g_model,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
+                        tools=[search_emails, get_company_pipeline, update_company_status, create_calendar_event, save_preference],
                         temperature=0.2,
                     ),
                 )
-                return final_response.text or "Done."
+                resp = await chat.send_message(clean_msg)
+                if resp.text:
+                    return resp.text
+            except Exception as e:
+                logger.warning(f"Gemini model {g_model} failed: {e}. Trying next fallback...")
+                continue
 
-            elif response.text:
-                return response.text
-
-        except Exception as e:
-            logger.warning(f"Gemini chat tool calling failed: {e}. Trying fallback...")
-
-    # Fallback to Groq if Gemini fails
+    # 2. Fallback to Groq with tool calling
     if settings.GROQ_API_KEY:
-        try:
-            from groq import Groq
-            groq_client = Groq(api_key=settings.GROQ_API_KEY)
+        groq_models = [settings.GROQ_MODEL, "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+        unique_groq = [m for i, m in enumerate(groq_models) if m and m not in groq_models[:i]]
 
-            groq_tools = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t["name"],
-                        "description": t["description"],
-                        "parameters": t["parameters"],
-                    },
-                }
-                for t in AVAILABLE_TOOLS
-            ]
+        for model_choice in unique_groq:
+            try:
+                from groq import Groq
+                groq_client = Groq(api_key=settings.GROQ_API_KEY)
 
-            groq_resp = await asyncio.to_thread(
-                groq_client.chat.completions.create,
-                model=settings.GROQ_MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_INSTRUCTION},
-                    {"role": "user", "content": clean_msg},
-                ],
-                tools=groq_tools,
-                tool_choice="auto",
-            )
+                groq_tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": t["name"],
+                            "description": t["description"],
+                            "parameters": t["parameters"],
+                        },
+                    }
+                    for t in AVAILABLE_TOOLS
+                ]
 
-            msg = groq_resp.choices[0].message
-            if msg.tool_calls:
-                tc = msg.tool_calls[0]
-                fn_name = tc.function.name
-                fn_args = json.loads(tc.function.arguments or "{}")
-                tool_output = await execute_tool_call(fn_name, fn_args)
-
-                second_resp = await asyncio.to_thread(
+                user_turn = {"role": "user", "content": clean_msg}
+                groq_resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
-                    model=settings.GROQ_MODEL,
+                    model=model_choice,
                     messages=[
                         {"role": "system", "content": SYSTEM_INSTRUCTION},
-                        {"role": "user", "content": clean_msg},
-                        msg,
-                        {"role": "tool", "tool_call_id": tc.id, "content": tool_output},
+                        user_turn,
                     ],
+                    tools=groq_tools,
+                    tool_choice="auto",
                 )
-                return second_resp.choices[0].message.content or "Done."
-            elif msg.content:
-                return msg.content
 
-        except Exception as groq_e:
-            logger.error(f"Groq chat fallback failed: {groq_e}")
+                msg = groq_resp.choices[0].message
+                if msg.tool_calls:
+                    tc = msg.tool_calls[0]
+                    fn_name = tc.function.name
+                    fn_args = json.loads(tc.function.arguments or "{}")
+                    tool_output = await execute_tool_call(fn_name, fn_args)
 
-    return "Received your instruction. System is monitoring your placement updates."
+                    second_resp = await asyncio.to_thread(
+                        groq_client.chat.completions.create,
+                        model=model_choice,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_INSTRUCTION},
+                            user_turn,
+                            msg,
+                            {"role": "tool", "tool_call_id": tc.id, "content": tool_output},
+                        ],
+                    )
+                    return second_resp.choices[0].message.content or "Done."
+                elif msg.content:
+                    return msg.content
+
+            except Exception as groq_e:
+                logger.warning(f"Groq fallback model {model_choice} failed: {groq_e}")
+                continue
+
+    # 3. Direct local intent handler (guarantees an intelligent answer even if internet/LLMs are down)
+    lower_msg = clean_msg.lower()
+    if any(k in lower_msg for k in ["pipeline", "status", "companies", "applied", "shortlist", "interview"]):
+        pipeline_data = await tool_get_company_pipeline()
+        return f"📊 *Placement Status:*\n{pipeline_data}"
+
+    if "mark" in lower_msg or "applied" in lower_msg:
+        words = clean_msg.split()
+        comp = words[-1]
+        return await tool_update_company_status(comp, "applied")
+
+    if any(k in lower_msg for k in ["search", "find", "test link", "email"]):
+        search_res = await tool_search_emails(clean_msg)
+        return f"🔍 *Search Results:*\n{search_res}"
+
+    return "Chief of Staff active and monitoring. Ask for status, search emails, or update application records."

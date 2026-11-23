@@ -70,13 +70,12 @@ class Settings(BaseSettings):
 
     # LLM Settings
     GEMINI_API_KEY: str = ""
-    # Defaults allow using gemini-2.5-flash / gemini-2.0-flash or gemini-3.8-flash
-    GEMINI_DEEP_MODEL: str = "gemini-2.5-flash"
-    GEMINI_FAST_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_DEEP_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_FAST_MODEL: str = "gemini-3.5-flash-lite"
 
     # Fallback LLM (Groq)
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
 
     # Google APIs (Personal Gmail & Calendar OAuth)
     GOOGLE_CLIENT_ID: str = ""

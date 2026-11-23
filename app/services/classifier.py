@@ -256,34 +256,44 @@ EMAIL BODY:
     last_error = None
 
     if settings.GEMINI_API_KEY:
-        for attempt in range(3):
-            try:
-                # Run sync Gemini SDK in threadpool
-                result = await asyncio.to_thread(
-                    call_gemini,
-                    prompt,
-                    system_instruction,
-                    settings.GEMINI_FAST_MODEL or "gemini-2.5-flash",
-                )
+        candidate_models = [settings.GEMINI_FAST_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash"]
+        unique_models = [m for i, m in enumerate(candidate_models) if m and m not in candidate_models[:i]]
+
+        for model in unique_models:
+            for attempt in range(2):
+                try:
+                    result = await asyncio.to_thread(
+                        call_gemini,
+                        prompt,
+                        system_instruction,
+                        model,
+                    )
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Gemini ({model}) attempt {attempt + 1} failed: {e}")
+                    await asyncio.sleep(1)
+            if result is not None:
                 break
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Gemini classification attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(2 ** attempt)
 
     # If Gemini failed or no Gemini API key, fallback to Groq
     if result is None and settings.GROQ_API_KEY:
         logger.info("Attempting classification via Groq fallback...")
-        try:
-            result = await asyncio.to_thread(
-                call_groq_fallback,
-                prompt,
-                system_instruction,
-                settings.GROQ_MODEL,
-            )
-        except Exception as e:
-            logger.error(f"Groq fallback also failed: {e}")
-            last_error = e
+        groq_models = [settings.GROQ_MODEL, "openai/gpt-oss-120b", "qwen/qwen3.8-27b"]
+        unique_groq = [m for i, m in enumerate(groq_models) if m and m not in groq_models[:i]]
+        for g_model in unique_groq:
+            try:
+                result = await asyncio.to_thread(
+                    call_groq_fallback,
+                    prompt,
+                    system_instruction,
+                    g_model,
+                )
+                if result is not None:
+                    break
+            except Exception as e:
+                logger.error(f"Groq fallback ({g_model}) failed: {e}")
+                last_error = e
 
     # If both LLMs are unavailable, fallback to deterministic heuristic classifier
     if result is None:

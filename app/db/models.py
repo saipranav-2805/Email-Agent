@@ -28,8 +28,8 @@ class Company(Base):
     role = Column(String(255), nullable=True)
     ctc = Column(String(100), nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     emails = relationship("EmailRecord", back_populates="company", cascade="all, delete-orphan")
 
@@ -53,8 +53,8 @@ class EmailRecord(Base):
     sender = Column(String(255), nullable=False)
     subject = Column(Text, nullable=False)
     body_text = Column(Text, nullable=False)
-    received_at = Column(DateTime, nullable=False)
-    processed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False)
+    processed_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     # Classification fields
     tier = Column(String(50), nullable=False, index=True)
@@ -84,7 +84,7 @@ class UserPreference(Base):
     rule_text = Column(Text, nullable=False)
     category = Column(String(50), default="general")
     is_active = Column(Boolean, default=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
 
 class ScheduledReminder(Base):
@@ -94,9 +94,9 @@ class ScheduledReminder(Base):
     email_id = Column(Integer, ForeignKey("emails.id", ondelete="CASCADE"), nullable=True, index=True)
     company_name = Column(String(255), nullable=False)
     event_title = Column(String(255), nullable=False)
-    event_time = Column(DateTime, nullable=False)
+    event_time = Column(DateTime(timezone=True), nullable=False)
     calendar_event_id = Column(String(255), nullable=True)
     status = Column(String(50), default="scheduled")  # scheduled, synced, cancelled
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     email = relationship("EmailRecord", back_populates="reminders")
