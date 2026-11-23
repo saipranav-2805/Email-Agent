@@ -4,24 +4,59 @@ import logging
 from sqlalchemy import select
 from telegram import Update
 from telegram.ext import ContextTypes
-from app.db.models import Company, EmailRecord
+from app.db.models import Company, EmailRecord, UserPreference
 from app.db.session import get_db_session
+from app.config import settings
 from app.services.calendar_service import create_calendar_event
 from app.services.chat_agent import handle_user_chat_message
 
 logger = logging.getLogger(__name__)
 
 
+async def record_user_chat_id(chat_id: int):
+    """Automatically captures and persists the user's real personal Telegram chat ID."""
+    bot_id_str = (settings.TELEGRAM_BOT_TOKEN or "").split(":")[0]
+    cid_str = str(chat_id)
+    if not cid_str or cid_str == bot_id_str:
+        return
+
+    # Update in-memory setting
+    settings.TELEGRAM_CHAT_ID = cid_str
+
+    # Persist in DB
+    try:
+        async with get_db_session() as session:
+            stmt = select(UserPreference).where(
+                UserPreference.category == "system_config",
+                UserPreference.rule_text == f"telegram_chat_id:{cid_str}",
+            )
+            existing = (await session.execute(stmt)).scalars().first()
+            if not existing:
+                session.add(UserPreference(
+                    category="system_config",
+                    rule_text=f"telegram_chat_id:{cid_str}",
+                    is_active=True,
+                ))
+                await session.commit()
+                logger.info(f"Captured & stored user Telegram Chat ID: {cid_str}")
+    except Exception as e:
+        logger.debug(f"Could not persist chat_id to DB: {e}")
+
+
 async def start_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Responds to /start."""
+    if update.effective_chat:
+        await record_user_chat_id(update.effective_chat.id)
+
     welcome_text = (
-        "Chief of Staff active.\n\n"
+        "Chief of Staff active and linked.\n\n"
         "I monitor your College & Personal inboxes, run zero-hallucination attachment scans, "
         "auto-sync deadlines to Google Calendar, and sound loud alarms for shortlists.\n\n"
         "Commands:\n"
         "/pipeline - View your active placement funnel\n"
+        "/backfill - Trigger instant sweep of both inboxes\n"
         "/help - How to interact with me\n\n"
-        "Or simply ask me anything directly (e.g. 'What tests are coming up?', 'Mark Amazon as applied')."
+        "Or simply ask me anything directly (e.g. 'What tests are coming up?', 'Search college mail for TCS')."
     )
     if update.effective_message:
         await update.effective_message.reply_text(welcome_text)
@@ -93,6 +128,9 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     """Routes natural text messages to the interactive Chief of Staff agent."""
     if not update.effective_message or not update.effective_message.text:
         return
+
+    if update.effective_chat:
+        await record_user_chat_id(update.effective_chat.id)
 
     user_text = update.effective_message.text
     logger.info(f"Received Telegram user message: {user_text}")

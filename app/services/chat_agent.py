@@ -318,15 +318,93 @@ async def execute_tool_call(name: str, args: Dict[str, Any]) -> str:
         return f"Error executing tool {name}: {str(e)}"
 
 
+async def build_inbox_context(user_message: str) -> str:
+    """Proactively retrieves relevant emails, tracked companies, and live Gmail search results to ground the LLM in real data."""
+    profile = load_candidate_profile()
+    context_sections = [
+        f"Candidate: {profile.name} (Reg: {profile.reg_no}, Branch: {profile.branch})",
+    ]
+
+    clean_msg = user_message.strip()
+
+    # 1. Fetch tracked companies from DB
+    try:
+        async with get_db_session() as session:
+            stmt = select(Company).order_by(Company.updated_at.desc()).limit(15)
+            companies = (await session.execute(stmt)).scalars().all()
+            if companies:
+                comp_lines = [f"- {c.name}: Status={c.status}, Role={c.role or 'N/A'}, CTC={c.ctc or 'N/A'}" for c in companies]
+                context_sections.append("Tracked Placement Companies in DB:\n" + "\n".join(comp_lines))
+    except Exception as e:
+        logger.debug(f"Context build DB company error: {e}")
+
+    # 2. Fetch recent placement emails from DB
+    try:
+        async with get_db_session() as session:
+            stmt = select(EmailRecord).order_by(EmailRecord.received_at.desc()).limit(8)
+            recent_emails = (await session.execute(stmt)).scalars().all()
+            if recent_emails:
+                em_lines = [
+                    f"- [{rec.source_inbox}] Subject: {rec.subject} | Tier: {rec.tier} | Received: {rec.received_at.strftime('%Y-%m-%d %H:%M')}\n  Body Snippet: {(rec.body_text or '')[:1200]}"
+                    for rec in recent_emails
+                ]
+                context_sections.append("Recent Ingested Emails in DB:\n" + "\n".join(em_lines))
+    except Exception as e:
+        logger.debug(f"Context build DB email error: {e}")
+
+    # 3. Live search if message appears to target a specific company or query
+    stopwords = {"what", "is", "the", "tell", "me", "about", "did", "we", "get", "any", "mail", "email", "from", "for", "in", "my", "how", "to", "status", "deadline"}
+    words = [w.strip("?,.!") for w in clean_msg.split() if w.lower().strip("?,.!") not in stopwords and len(w) >= 3]
+    search_query = " ".join(words[:4]) if words else clean_msg
+
+    if search_query:
+        live_hits = []
+        if settings.COLLEGE_GOOGLE_REFRESH_TOKEN:
+            try:
+                c_hits = await asyncio.to_thread(search_college_gmail, search_query, 3)
+                for h in c_hits:
+                    live_hits.append(f"- [College Mail] {h['subject']} (Date: {h.get('date', '')})\n  Snippet: {h.get('snippet', '')[:160]}")
+            except Exception as e:
+                logger.debug(f"Live college search error: {e}")
+
+        if settings.GOOGLE_REFRESH_TOKEN:
+            try:
+                p_hits = await asyncio.to_thread(search_personal_gmail, search_query, 3)
+                for h in p_hits:
+                    live_hits.append(f"- [Personal Mail] {h['subject']} (Date: {h.get('date', '')})\n  Snippet: {h.get('snippet', '')[:160]}")
+            except Exception as e:
+                logger.debug(f"Live personal search error: {e}")
+
+        if live_hits:
+            context_sections.append(f"Live Gmail Search Results for '{search_query}':\n" + "\n".join(live_hits))
+
+    return "\n\n".join(context_sections)
+
+
 async def handle_user_chat_message(user_message: str) -> str:
-    """Handles an interactive chat message from Telegram using Gemini with tool calling or direct fallback."""
+    """Handles an interactive chat message from Telegram using Gemini or Groq with grounded email context."""
     clean_msg = user_message.strip()
     if not clean_msg:
         return "Please send a message or instruction."
 
+    # Build grounded inbox & placement context
+    inbox_context = await build_inbox_context(clean_msg)
+
+    dynamic_system_prompt = (
+        f"{SYSTEM_INSTRUCTION}\n\n"
+        f"--- CURRENT REAL-TIME INBOX & PLACEMENT CONTEXT ---\n"
+        f"{inbox_context}\n"
+        f"---------------------------------------------------\n\n"
+        f"STRICT RULES:\n"
+        f"1. Ground your answer in the real emails and companies shown above.\n"
+        f"2. If the user asks about a company, assessment, or test link, report the EXACT details from their inboxes.\n"
+        f"3. If no email or record exists for what they asked, say clearly: 'I checked both your College and Personal mailboxes and found no records for [Topic] yet.'\n"
+        f"4. NEVER hallucinate US tech salaries or generic corporate fluff unless specifically requested."
+    )
+
     # 1. Try Gemini with async client
     if settings.GEMINI_API_KEY:
-        gemini_models = [settings.GEMINI_DEEP_MODEL, settings.GEMINI_FAST_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash"]
+        gemini_models = [settings.GEMINI_DEEP_MODEL, settings.GEMINI_FAST_MODEL, "gemini-3.5-flash-lite"]
         unique_gemini = [m for i, m in enumerate(gemini_models) if m and m not in gemini_models[:i]]
 
         for g_model in unique_gemini:
@@ -360,19 +438,19 @@ async def handle_user_chat_message(user_message: str) -> str:
                 chat = client.aio.chats.create(
                     model=g_model,
                     config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTION,
+                        system_instruction=dynamic_system_prompt,
                         tools=[search_emails, get_company_pipeline, update_company_status, create_calendar_event, save_preference],
-                        temperature=0.2,
+                        temperature=0.1,
                     ),
                 )
-                resp = await asyncio.wait_for(chat.send_message(clean_msg), timeout=3.5)
+                resp = await asyncio.wait_for(chat.send_message(clean_msg), timeout=15.0)
                 if resp.text:
                     return resp.text
             except Exception as e:
                 logger.warning(f"Gemini model {g_model} failed: {e}. Trying next fallback...")
                 continue
 
-    # 2. Fallback to Groq with tool calling
+    # 2. Fallback to Groq with tool calling & enriched context
     if settings.GROQ_API_KEY:
         groq_models = [settings.GROQ_MODEL, "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
         unique_groq = [m for i, m in enumerate(groq_models) if m and m not in groq_models[:i]]
@@ -399,7 +477,7 @@ async def handle_user_chat_message(user_message: str) -> str:
                     groq_client.chat.completions.create,
                     model=model_choice,
                     messages=[
-                        {"role": "system", "content": SYSTEM_INSTRUCTION},
+                        {"role": "system", "content": dynamic_system_prompt},
                         user_turn,
                     ],
                     tools=groq_tools,
@@ -417,7 +495,7 @@ async def handle_user_chat_message(user_message: str) -> str:
                         groq_client.chat.completions.create,
                         model=model_choice,
                         messages=[
-                            {"role": "system", "content": SYSTEM_INSTRUCTION},
+                            {"role": "system", "content": dynamic_system_prompt},
                             user_turn,
                             msg,
                             {"role": "tool", "tool_call_id": tc.id, "content": tool_output},

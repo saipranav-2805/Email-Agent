@@ -9,7 +9,7 @@ from app.bot.telegram_app import init_telegram_webhook, process_telegram_update
 from app.config import settings
 from app.db.session import engine, get_db_session, init_db
 from app.services.processor import process_incoming_email
-from app.services.scheduler import scheduler, start_scheduler
+from app.services.scheduler import get_scheduler, start_scheduler
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -55,8 +55,9 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down application...")
-    if scheduler and scheduler.running:
-        scheduler.shutdown(wait=False)
+    sched = get_scheduler()
+    if sched and sched.running:
+        sched.shutdown(wait=False)
     await engine.dispose()
     logger.info("Application shutdown clean.")
 
@@ -94,7 +95,8 @@ async def health_check():
         logger.error(f"Health check DB error: {e}")
         db_status = "error"
 
-    scheduler_status = "running" if (scheduler and scheduler.running) else "stopped"
+    sched = get_scheduler()
+    scheduler_status = "running" if (sched and sched.running) else "stopped"
 
     return {
         "status": "ok" if db_status == "connected" else "degraded",

@@ -294,3 +294,9 @@ def start_scheduler() -> AsyncIOScheduler:
     scheduler.start()
     logger.info("APScheduler started with IST timezone. Poller (5m), Daily Digest (21:00), Weekly Review (Sun 20:00).")
     return scheduler
+
+
+def get_scheduler() -> Optional[AsyncIOScheduler]:
+    """Returns the running scheduler instance."""
+    global scheduler
+    return scheduler

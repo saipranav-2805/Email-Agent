@@ -90,6 +90,37 @@ async def process_telegram_update(update_dict: dict):
     await app.process_update(update)
 
 
+async def get_active_chat_id() -> Optional[str]:
+    """Retrieves the active user chat ID from memory, settings, or database."""
+    bot_id_str = (settings.TELEGRAM_BOT_TOKEN or "").split(":")[0]
+
+    # 1. Check in-memory setting first (must not be the bot's own ID)
+    if settings.TELEGRAM_CHAT_ID and str(settings.TELEGRAM_CHAT_ID) != bot_id_str:
+        return str(settings.TELEGRAM_CHAT_ID)
+
+    # 2. Check database user_preferences for captured telegram_chat_id
+    try:
+        from sqlalchemy import select
+        from app.db.models import UserPreference
+        from app.db.session import get_db_session
+
+        async with get_db_session() as session:
+            stmt = select(UserPreference).where(
+                UserPreference.category == "system_config",
+                UserPreference.rule_text.startswith("telegram_chat_id:"),
+            ).order_by(UserPreference.id.desc())
+            pref = (await session.execute(stmt)).scalars().first()
+            if pref:
+                cid = pref.rule_text.split(":", 1)[1].strip()
+                if cid and cid != bot_id_str:
+                    settings.TELEGRAM_CHAT_ID = cid
+                    return cid
+    except Exception as e:
+        logger.debug(f"Could not retrieve chat_id from DB: {e}")
+
+    return None
+
+
 async def send_telegram_notification(
     text: str,
     reply_markup=None,
@@ -97,13 +128,15 @@ async def send_telegram_notification(
 ) -> Optional[int]:
     """Dispatches a notification message to the configured TELEGRAM_CHAT_ID."""
     app = get_telegram_application()
-    if not app or not settings.TELEGRAM_CHAT_ID:
-        logger.info(f"[TELEGRAM SIMULATION] Message to {settings.TELEGRAM_CHAT_ID or 'UNCONFIGURED'}:\n{text}")
+    target_chat_id = await get_active_chat_id()
+
+    if not app or not target_chat_id:
+        logger.info(f"[TELEGRAM SIMULATION] Message to {target_chat_id or 'UNCONFIGURED'}:\n{text}")
         return None
 
     try:
         sent = await app.bot.send_message(
-            chat_id=settings.TELEGRAM_CHAT_ID,
+            chat_id=target_chat_id,
             text=text,
             parse_mode=parse_mode,
             reply_markup=reply_markup,
@@ -116,7 +149,7 @@ async def send_telegram_notification(
             # Fallback to plain text if MarkdownV2 parsing fails
             clean_text = text.replace("\\", "").replace("*", "").replace("_", "").replace("`", "")
             sent = await app.bot.send_message(
-                chat_id=settings.TELEGRAM_CHAT_ID,
+                chat_id=target_chat_id,
                 text=clean_text,
                 reply_markup=reply_markup,
             )

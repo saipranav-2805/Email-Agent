@@ -256,24 +256,22 @@ EMAIL BODY:
     last_error = None
 
     if settings.GEMINI_API_KEY:
-        candidate_models = [settings.GEMINI_FAST_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash"]
+        candidate_models = [settings.GEMINI_FAST_MODEL, "gemini-3.5-flash-lite"]
         unique_models = [m for i, m in enumerate(candidate_models) if m and m not in candidate_models[:i]]
 
         for model in unique_models:
-            for attempt in range(2):
-                try:
-                    result = await asyncio.to_thread(
-                        call_gemini,
-                        prompt,
-                        system_instruction,
-                        model,
-                    )
+            try:
+                result = await asyncio.to_thread(
+                    call_gemini,
+                    prompt,
+                    system_instruction,
+                    model,
+                )
+                if result is not None:
                     break
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Gemini ({model}) attempt {attempt + 1} failed: {e}")
-                    await asyncio.sleep(1)
-            if result is not None:
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Gemini ({model}) failed: {e}. Trying fallback...")
                 break
 
     # If Gemini failed or no Gemini API key, fallback to Groq
