@@ -37,7 +37,16 @@ const CONFIG = {
  * Creates or gets the Gmail label used for tracking processed emails.
  */
 function getOrCreateLabel(labelName) {
-  const name = labelName || CONFIG.PROCESSED_LABEL || "AgentProcessed";
+  // Defensive: ensure name is always a non-empty string to avoid "Invalid argument: name" error
+  const name = (typeof labelName === "string" && labelName.trim())
+    ? labelName.trim()
+    : (CONFIG && CONFIG.PROCESSED_LABEL ? CONFIG.PROCESSED_LABEL : "AgentProcessed");
+  
+  if (!name) {
+    Logger.log("getOrCreateLabel: label name resolved to empty — using fallback 'AgentProcessed'");
+    return GmailApp.getUserLabelByName("AgentProcessed") || GmailApp.createLabel("AgentProcessed");
+  }
+  
   let label = GmailApp.getUserLabelByName(name);
   if (!label) {
     label = GmailApp.createLabel(name);

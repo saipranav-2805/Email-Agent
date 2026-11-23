@@ -98,11 +98,14 @@ def fetch_recent_personal_emails(max_results: int = 15) -> List[Dict[str, Any]]:
         return []
 
     try:
-        # Fetch recent messages from inbox, strictly excluding self-sent and placement-alarm emails
+        # Fetch recent messages from inbox, strictly excluding self-sent and placement-alarm emails.
+        # Use explicit address in -from: because Gmail's "me" token is unreliable for self-loop blocking.
+        personal_addr = (settings.PERSONAL_GMAIL_ADDRESS or "").strip()
+        from_exclusion = f"-from:{personal_addr}" if personal_addr else "-from:me"
         results = service.users().messages().list(
             userId="me",
             maxResults=max_results,
-            q="in:inbox -subject:[PLACEMENT-ALARM] -from:me",
+            q=f'in:inbox -label:SENT -subject:"[PLACEMENT-ALARM]" -subject:"CHIEF OF STAFF" {from_exclusion}',
         ).execute()
 
         messages = results.get("messages", [])
