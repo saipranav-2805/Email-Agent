@@ -9,6 +9,7 @@ from telegram.ext import (
     filters,
 )
 from app.bot.handlers import (
+    backfill_command_handler,
     callback_query_handler,
     help_command_handler,
     pipeline_command_handler,
@@ -39,6 +40,7 @@ def get_telegram_application() -> Optional[Application]:
         app.add_handler(CommandHandler("start", start_command_handler))
         app.add_handler(CommandHandler("help", help_command_handler))
         app.add_handler(CommandHandler("pipeline", pipeline_command_handler))
+        app.add_handler(CommandHandler("backfill", backfill_command_handler))
         app.add_handler(CallbackQueryHandler(callback_query_handler))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
 

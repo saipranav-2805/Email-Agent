@@ -350,7 +350,7 @@ async def handle_user_chat_message(user_message: str) -> str:
                         temperature=0.2,
                     ),
                 )
-                resp = await chat.send_message(clean_msg)
+                resp = await asyncio.wait_for(chat.send_message(clean_msg), timeout=3.5)
                 if resp.text:
                     return resp.text
             except Exception as e:

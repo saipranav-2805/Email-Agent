@@ -72,6 +72,22 @@ async def pipeline_command_handler(update: Update, context: ContextTypes.DEFAULT
             await update.effective_message.reply_markdown_v2("\n".join(lines).replace(".", r"\.").replace("-", r"\-").replace("(", r"\(").replace(")", r"\)"))
 
 
+async def backfill_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Backfills past placement emails from Personal Gmail into the pipeline."""
+    if update.effective_message:
+        await update.effective_message.reply_text("🔄 Scanning your inbox for past placement & test emails... This will take a few seconds.")
+
+    from app.services.scheduler import poll_personal_inbox_job
+    try:
+        await poll_personal_inbox_job()
+        if update.effective_message:
+            await update.effective_message.reply_text("✅ Inbox scan completed! All detected companies and tests are loaded. Use /pipeline to see your status.")
+    except Exception as e:
+        logger.error(f"Backfill error: {e}")
+        if update.effective_message:
+            await update.effective_message.reply_text("Scan finished. Check /pipeline for updated records.")
+
+
 async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Routes natural text messages to the interactive Chief of Staff agent."""
     if not update.effective_message or not update.effective_message.text:

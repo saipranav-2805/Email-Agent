@@ -172,6 +172,45 @@ function testConnection() {
 }
 
 /**
+ * Backfills past placement emails from your college inbox history.
+ * Run this function once manually if you want the Chief of Staff to ingest all previous placement circulars!
+ */
+function backfillPastPlacementEmails() {
+  const processedLabel = getOrCreateLabel(CONFIG.PROCESSED_LABEL);
+  // Search up to 50 historical placement threads
+  const threads = GmailApp.search(CONFIG.SEARCH_QUERY, 0, 50);
+
+  if (!threads || threads.length === 0) {
+    Logger.log("No historical placement emails found matching search query.");
+    return;
+  }
+
+  Logger.log(`Found ${threads.length} historical threads to backfill.`);
+
+  for (let i = 0; i < threads.length; i++) {
+    const thread = threads[i];
+    const messages = thread.getMessages();
+    let allSuccess = true;
+
+    for (let j = 0; j < messages.length; j++) {
+      try {
+        const payload = buildMessagePayload(messages[j], thread.getId());
+        const ok = sendToBackend(payload);
+        if (!ok) allSuccess = false;
+      } catch (err) {
+        Logger.log(`Error backfilling message: ${err.toString()}`);
+        allSuccess = false;
+      }
+    }
+
+    if (allSuccess) {
+      thread.addLabel(processedLabel);
+    }
+  }
+  Logger.log("Historical backfill completed!");
+}
+
+/**
  * Creates an automatic time-driven trigger running every 5 minutes.
  */
 function createTimeTrigger() {
